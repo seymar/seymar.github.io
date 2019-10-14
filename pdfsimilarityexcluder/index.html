@@ -1,0 +1,300 @@
+<!doctype html>
+<html>
+    <head>
+        <title>PDF cleaner</title>
+
+
+        <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            font-family: Helvetica;
+        }
+        body {
+            margin: 0 auto;
+            width: 720px;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        .thumb {
+            height: 75px;
+            border: 1px solid #000;
+            margin: 10px 5px 0 0;
+        }
+        #dropzone {
+            background: grey;
+            width: 100%;
+            text-align: center;
+            padding: 25px;
+        }
+        input {
+            background: #999;
+            padding: 5px;
+        }
+        i {
+            color: #555;
+            font-size: 0.8em;
+        }
+        .page {
+            display: none;
+        }
+        .page:target {
+            display: block;
+        }
+        .slide {
+            width: 50%;
+            float: left;
+            padding: 10px;
+            margin-top: 10px;
+            border-top: 1px solid black;
+        }
+        .slide canvas {
+            float: right;
+            width: 100%;
+            border: 1px solid #ccc;
+            margin-top: 10px;
+        }
+        .slide.excluded {
+            background: #ff5555
+        }
+        button.download {
+            float: right;
+            padding: 10px;
+            font-size: 1em;
+            background: #ccc;
+            border: none;
+            cursor: pointer;
+        }
+        </style>
+
+        <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js" type="text/javascript"></script>
+        <script src="./js/pdf.js" type="text/javascript"></script>
+        <script src="./js/similarity.js" type="text/javascript"></script>
+
+        <script>
+        
+        const PDFDocument = PDFLib.PDFDocument
+        var pagesToCopy = []
+        const fileQueue = []
+
+        function handleFileSelect (e) {
+            e.stopPropagation()
+            e.preventDefault()
+            const files = e.target.files || e.dataTransfer.files
+            
+            // Multiple files not supported for now
+            //for (var f in files) {
+                const file = files[0]
+                //if (!(file instanceof File)) continue
+                
+                fileQueue[0] = { file: file }
+
+                // Only process PDF files.
+                if (!file.type.match('pdf.*')) {
+                    return false
+                    //continue
+                }
+                
+                const reader = new FileReader()
+                reader.onload = (function(theFile) {
+                    return function(e) {
+                        var span = document.createElement('span')
+                        span.innerHTML = `<br />${escape(theFile.name)}`
+                        document.getElementById('fn').appendChild(span, null)
+                        
+                        parseFile(theFile, e.target.result)
+                    }
+                })(file)
+
+                reader.readAsArrayBuffer(file)
+            //}
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            //if (!window.location.hash) {
+                window.location.hash = 'dropzone'
+            //}
+            document.getElementById('files').addEventListener('change', handleFileSelect, false);
+
+            function handleDragOver(evt) {
+                evt.stopPropagation();
+                evt.preventDefault();
+                evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
+            }
+
+            var dropZone = document.getElementById('dropzone');
+            dropZone.addEventListener('dragover', handleDragOver, false);
+            dropZone.addEventListener('drop', handleFileSelect, false);
+        })
+
+        function parseFile(file, fileBuffer) {
+            PDFDocument.load(fileBuffer)
+            .then(doc => doc.getPages())
+            .then(docPages =>  {
+                // Parse titles using other pdfjsLib
+                const fileu8 = new Uint8Array(fileBuffer)
+                const lt = pdfjsLib.getDocument(fileu8)
+                lt.promise.then(pdf => {
+                    const numPages = pdf._pdfInfo.numPages
+                    const contents = new Array(numPages).fill({})
+                    let contentsLeft = contents.length
+                    contents.forEach((content, i) => {
+                        pdf.getPage(i+1).then(page => {
+                            const viewport = page.getViewport({ scale: 0.7, })
+                            const _ce = document.createElement('canvas')
+                            _ce.height = viewport.height
+                            _ce.width = viewport.width
+                            const _c = _ce.getContext('2d')
+                            const li_el = document.createElement('div')
+                                li_el.classList.add('slide')
+                                li_el.innerHTML += `<span class="title">${i+1}</span><br />`
+                                li_el.appendChild(_ce)
+                            
+                            document.getElementById('pagelist').appendChild(li_el)
+
+                            const renderTask = page.render({
+                                canvasContext: _c,
+                                viewport: viewport
+                            })
+                            renderTask.promise.then(function () {
+                                    // Text content for comparison
+                                page.getTextContent().then(tc => {
+                                    contents[i] = tc.items
+
+                                    // Last page
+                                    if(--contentsLeft == 0) {
+                                        fileQueue[0] = { ...fileQueue[0],
+                                            docPages: docPages,
+                                            contents: contents,
+                                            pagestats: []
+                                        }
+                                        window.location.hash = 'pageselector'
+                                        processPages()
+                                    }
+                                })
+                            })
+
+                            
+                        })
+                        .catch(console.error)
+                    })
+                })
+            })
+        }
+
+        function processPages() {
+            const docPages = fileQueue[0].docPages
+            const contents = fileQueue[0].contents
+
+            applyThreshold(85)   
+        }
+
+        function applyThreshold(th) {
+            console.log(th)
+            const docPages = fileQueue[0].docPages
+            const contents = fileQueue[0].contents
+            
+            fileQueue[0].pagesToCopy = []
+
+            docPages.forEach((page, p) => {
+                const content = contents[p]
+                const title = content[content.length - 1].str
+
+                const nextContent = contents[p + 1]
+                
+                if (nextContent) {
+                    let score = 0
+                    content.forEach(item => {
+                        const idx = nextContent.findIndex(nc => nc.str == item.str)
+                        if (idx != -1) {
+                            score += similarity(item.str, nextContent[idx].str)
+                        }
+                    })
+
+                    // If less than 90% of the content of this page is found on the next page
+                    const percent = Math.round(100 * score / content.length)
+                    let remove = percent > th
+                    remove = remove ? content.length < nextContent.length : false
+
+                    document.getElementById('pagelist').getElementsByClassName('title')[p].innerHTML = `${p} - ${percent} % (${score}/${content.length})`;
+                    
+                    if (remove) {
+                        document.getElementById('pagelist').children[p].classList.add('excluded')
+                    } else {
+                        document.getElementById('pagelist').children[p].classList.remove('excluded')
+                        fileQueue[0].pagesToCopy.push(p)
+                    }
+                    document.getElementById('ptitle').innerHTML = `Preview (${fileQueue[0].pagesToCopy.length} of ${docPages.length} kept)`
+                }
+            })
+        }
+
+        function generatePDF(file, pages, contents) {
+            const doc = fileQueue[0].docPages[0].doc
+
+            const pdfDoc = PDFDocument.create().then(npdf => {
+                // Put the selected pages into a new PDF
+                npdf.copyPages(doc, fileQueue[0].pagesToCopy)
+                .then(pages => {
+                    pages.forEach(page => {
+                        npdf.addPage(page)
+                    })
+                    const pdfBytes = npdf.save().then(pdfBytes => {
+                        console.log(fileQueue[0])
+                        const fnsplit = fileQueue[0].file.name.split('.')
+                        const ext = fnsplit.pop()
+                        const fn = fnsplit.join('') + '_cleaned.' + ext;
+                        download(fn, pdfBytes)
+                    })
+                })
+            })
+        }
+
+        function download(filename, pdfBytes) {
+            const blob = new Blob([pdfBytes], { type: 'octet/stream' });
+            const blobUrl = window.URL.createObjectURL(blob);
+            
+            const a = document.createElement('a')
+                a.href = blobUrl;
+                a.target = '_blank'
+                a.download = filename
+                a.innerHTML = "Download"
+            a.click()
+            a.remove()
+        }
+        
+        </script>
+    </head>
+
+    <body> 
+        <h1>PDF similar pages excluder</h1>
+        <p>
+            Removes pages that are similar to the next one.
+        </p>
+        <i>
+            The similarity percentage is subjected to a threshold to make sure content such as page numbers has no effect.
+        </i>
+        <br />
+        <br />
+        <div id="dropzone" class="page">
+            Drop PDF here
+            <br /><br />
+            <i>or</i>
+            <br /><br />
+            <input type="file" id="files" name="files[]" multiple />
+            <span id="fn"></span>
+        </div>
+        <div id="pageselector" class="page">
+            <button class="download" onclick="generatePDF()">Download</button>
+            <h2 id="ptitle">
+                Preview
+            </h2>
+            
+            Similarity threshold:
+            <br />
+            <input type="range" min="50" step="1"  max="99" value="85" oninput="this.nextSibling.innerHTML = `${this.value} %`;applyThreshold(this.value)" /><span>85 %</span>
+            <div id="pagelist"></div>
+        </div>
+    </body>
+</html>
