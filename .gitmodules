@@ -1,0 +1,3 @@
+[submodule "pdfsimilarityexcluder"]
+	path = pdfsimilarityexcluder
+	url = https://github.com/seymar/pdfsimilarityexcluder.git
