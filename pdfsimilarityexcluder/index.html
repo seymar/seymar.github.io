@@ -150,6 +150,18 @@
                                 li_el.classList.add('slide')
                                 li_el.innerHTML += `<span class="title">${i+1}</span><br />`
                                 li_el.appendChild(_ce)
+                                li_el.addEventListener("mouseup", () => {
+                                    const existingIndex = fileQueue[0].pagesToCopy.findIndex(a => a == i)
+                                    console.log(fileQueue[0].pagesToCopy)
+                                    if (existingIndex == -1) { // If already excluded
+                                        fileQueue[0].pagesToCopy.push(i)
+                                        document.getElementById('pagelist').children[i].classList.remove('excluded')
+                                    } else {
+                                        fileQueue[0].pagesToCopy.splice(existingIndex, 1)
+                                        document.getElementById('pagelist').children[i].classList.add('excluded')
+                                    }
+                                    r_ptitle()
+                                }, false)
                             
                             document.getElementById('pagelist').appendChild(li_el)
 
@@ -183,6 +195,10 @@
             })
         }
 
+        function r_ptitle() {
+            document.getElementById('ptitle').innerHTML = `Preview (${fileQueue[0].pagesToCopy.length} of ${fileQueue[0].docPages.length} kept)`
+        }
+
         function processPages() {
             const docPages = fileQueue[0].docPages
             const contents = fileQueue[0].contents
@@ -199,7 +215,8 @@
 
             docPages.forEach((page, p) => {
                 const content = contents[p]
-                const title = content[content.length - 1].str
+                const lastEl = content[content.length - 1]
+                const title = lastEl ? lastEl.str : ''
 
                 const nextContent = contents[p + 1]
                 
@@ -225,7 +242,7 @@
                         document.getElementById('pagelist').children[p].classList.remove('excluded')
                         fileQueue[0].pagesToCopy.push(p)
                     }
-                    document.getElementById('ptitle').innerHTML = `Preview (${fileQueue[0].pagesToCopy.length} of ${docPages.length} kept)`
+                    r_ptitle()
                 }
             })
         }
@@ -273,7 +290,7 @@
             Removes pages that are similar to the next one.
         </p>
         <i>
-            The similarity percentage is subjected to a threshold to make sure content such as page numbers has no effect.
+            The similarity percentage is subjected to a threshold to make sure content such as page numbers have no effect.
         </i>
         <br />
         <br />
@@ -296,5 +313,10 @@
             <input type="range" min="50" step="1"  max="99" value="85" oninput="this.nextSibling.innerHTML = `${this.value} %`;applyThreshold(this.value)" /><span>85 %</span>
             <div id="pagelist"></div>
         </div>
+        <br /><br />
+        <hr />
+        <footer>
+            <i>By Stijn Martens</i>
+        </footer>
     </body>
 </html>
